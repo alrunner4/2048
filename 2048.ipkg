@@ -1,0 +1,5 @@
+package AGameOf2048
+modules = AGameOf2048
+depends = contrib
+main = AGameOf2048
+executable = "2048"
