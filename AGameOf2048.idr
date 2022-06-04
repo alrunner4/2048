@@ -14,14 +14,17 @@ import System.Random
 -- Data Representation --
 
 data Orientation = ColumnMajor | RowMajor
-transposed: Orientation -> Orientation
-transposed = \case
-   ColumnMajor => RowMajor
-   RowMajor    => ColumnMajor
-
 data GameBoard: Orientation -> Nat -> Nat -> Type where
    BoardCols: Vect width  (Vect height (Maybe Integer)) -> GameBoard ColumnMajor width height
    BoardRows: Vect height (Vect width  (Maybe Integer)) -> GameBoard RowMajor    width height
+
+(.rows): {h: Nat} -> GameBoard o w h -> Vect h (Vect w (Maybe Integer))
+(.rows) (BoardCols cols) = transpose cols
+(.rows) (BoardRows rows) = rows
+
+(.cols): {w: Nat} -> GameBoard o w h -> Vect w (Vect h (Maybe Integer))
+(.cols) (BoardCols cols) = cols
+(.cols) (BoardRows rows) = transpose rows
 
 data GameInput
    = Move ({o: Orientation} -> {w,h: Nat} -> GameBoard o w h -> (o' ** GameBoard o' w h))
@@ -35,25 +38,14 @@ empty: {o: Orientation} -> {w,h: Nat} -> GameBoard o w h
 empty {o = ColumnMajor} = BoardCols (replicate w (replicate h Nothing))
 empty {o = RowMajor}    = BoardRows (replicate h (replicate w Nothing))
 
-transpose: {o: Orientation} -> {w,h: Nat} -> GameBoard o w h -> GameBoard (transposed o) w h
-transpose {h = Z} = const empty
-transpose {w = Z} = const empty
-transpose {w = S w', h = S h'} = \case
-   BoardCols xs =>
-      let BoardRows tails = transpose (BoardCols$ map tail xs)
-      in BoardRows$ map head xs :: tails
-   BoardRows xs =>
-      let BoardCols tails = transpose (BoardRows$ map tail xs)
-      in BoardCols$ map head xs :: tails
-
 contains: Integer -> GameBoard o w h -> Bool
 contains target (BoardRows rows) = any (elem (Just target)) rows
 contains target (BoardCols cols) = any (elem (Just target)) cols
 
-toVect: (n: Nat) -> List a -> Vect n (Maybe a)
-toVect    n   Nil    = replicate n Nothing
-toVect (S n) (x::xs) = Just x :: toVect n xs
-toVect  Z     _      = Nil
+padRight: (n: Nat) -> List a -> Vect n (Maybe a)
+padRight    n   Nil    = replicate n Nothing
+padRight (S n) (x::xs) = Just x :: padRight n xs
+padRight  Z     _      = Nil
 
 mergePairs: Num a => Eq a => List a -> List a
 mergePairs xx@(x1::x2::xs) = if x1 == x2
@@ -62,31 +54,19 @@ mergePairs xx@(x1::x2::xs) = if x1 == x2
 mergePairs xs = xs
 
 mergePairsToFront: Num a => Eq a => {k: Nat} -> Vect k (Maybe a) -> Vect k (Maybe a)
-mergePairsToFront v = toVect k (mergePairs (catMaybes (toList v)))
+mergePairsToFront v = padRight k (mergePairs (catMaybes (toList v)))
 
 slideLeft: {w,h: Nat} -> GameBoard o w h -> GameBoard RowMajor w h
-slideLeft (BoardRows rows) = BoardRows (map mergePairsToFront rows)
-slideLeft (BoardCols cols) = BoardRows (map mergePairsToFront (transpose cols))
+slideLeft board = BoardRows (map mergePairsToFront board.rows)
 
 slideRight: {w,h: Nat} -> GameBoard o w h -> GameBoard RowMajor w h
-slideRight (BoardRows rows) =
-   let BoardRows mirrored = slideLeft (BoardRows (map reverse rows))
-   in BoardRows (map reverse mirrored)
-slideRight (BoardCols cols) =
-   let BoardRows mirrored = slideLeft (BoardRows (map reverse (transpose cols)))
-   in BoardRows (map reverse mirrored)
+slideRight board = BoardRows$ map (reverse . mergePairsToFront . reverse) board.rows
 
 slideUp: {w,h: Nat} -> GameBoard o w h -> GameBoard ColumnMajor w h
-slideUp (BoardCols cols) = BoardCols (map mergePairsToFront cols)
-slideUp (BoardRows rows) = BoardCols (map mergePairsToFront (transpose rows))
+slideUp board = BoardCols (map mergePairsToFront board.cols)
 
 slideDown: {o: Orientation} -> {w,h: Nat} -> GameBoard o w h -> GameBoard ColumnMajor w h
-slideDown (BoardCols cols) =
-   let BoardCols flipped = slideUp (BoardCols (map reverse cols))
-   in BoardCols (map reverse flipped)
-slideDown (BoardRows rows) =
-   let BoardCols flipped = slideUp (BoardCols (map reverse (transpose rows)))
-   in BoardCols (map reverse flipped)
+slideDown board = BoardCols$ map (reverse . mergePairsToFront . reverse) board.cols
 
 availabilities: {w,h: Nat} -> GameBoard o w h -> List (Fin w, Fin h)
 availabilities (BoardRows rows) =
@@ -103,19 +83,12 @@ emptyNothing: Show a => Maybe a -> String
 emptyNothing Nothing  = ""
 emptyNothing (Just i) = show i
 
-[fromRows] Show (GameBoard RowMajor w h) where
-   show (BoardRows rows) = fastUnlines$
-      toList rows <&> \r =>
+{w: Nat} -> {h: Nat} -> Show (GameBoard o w h) where
+   show board = fastUnlines$
+      toList board.rows <&> \r =>
          fastConcat$ ("| " ::) $ (++ [" |"]) $intersperse " | "
                      $map (padLeft 4 ' ' . emptyNothing)
                           (toList r)
-
-[fromCols] {w: Nat} -> {h: Nat} -> Show (GameBoard ColumnMajor w h) where
-   show bcols = show @{fromRows} (transpose bcols)
-
-{w: Nat} -> {h: Nat} -> Show (GameBoard o w h) where
-   show (BoardRows rows) = show @{fromRows} (BoardRows rows)
-   show (BoardCols cols) = show @{fromCols} (BoardCols cols)
 
 maxHeight: Nat; maxHeight = 5
 maxWidth:  Nat; maxWidth  = 5
@@ -188,7 +161,7 @@ getMoveInput = do
           'A' => pure $move slideLeft
           'S' => pure $move slideDown
           'D' => pure $move slideRight
-          'Q' => pure  Quit
+          'Q' => pure Quit
           _   => fail "invalid move input (Q to quit)"
    getLineOrEnd <&> map parseMove >>= \case
       Nothing            => pure Quit
