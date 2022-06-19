@@ -106,10 +106,10 @@ newGamePrompt = """
 
 %default covering
 
-placeRandom: HasIO io => {w,h: Nat} -> GameBoard w h -> Maybe (io (GameBoard w h))
+placeRandom: HasIO io => {w,h: Nat} -> GameBoard w h -> io (Maybe (GameBoard w h))
 placeRandom b = case availabilities b of
-   [] => Nothing
-   o::opts => Just $do
+   [] => pure Nothing
+   o::opts => Just <$> do
       val <- rndSelect [2,4]
       (x,y) <- rndSelect (o::opts)
       pure$ case b of
@@ -145,9 +145,9 @@ newGame = do
       Nothing                => abort "end of input"
       Just (Left   e       ) => putStrLn ("Error: " ++ e) >> newGame
       Just (Right ((w,h),_)) => do
-         let Just p1 = placeRandom empty | _ => abort "impossible: failed to place starter numbers"
-         Just p2 <- map placeRandom p1   | _ => abort "impossible: failed to place starter numbers"
-         pure (w ** h ** !p2)
+         Just p1 <- placeRandom empty | _ => abort "impossible: failed to place starter numbers"
+         Just p2 <- placeRandom p1    | _ => abort "impossible: failed to place starter numbers"
+         pure (w ** h ** p2)
 
 getMoveInput: IO GameInput
 getMoveInput = do
@@ -172,12 +172,11 @@ runGame = do
    b <- get
    let b = m b
    let False = contains 2048 b | True => pure True
-   case placeRandom b of
+   placeRandom b >>= \case
       Nothing => pure False
-      Just place => do
-         b <- place
-         print b
-         put b
+      Just newBoard => do
+         print newBoard
+         put newBoard
          runGame
 
 main: IO ()
