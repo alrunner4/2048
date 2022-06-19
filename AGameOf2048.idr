@@ -13,32 +13,29 @@ import System.Random
 -------------------------
 -- Data Representation --
 
-data Orientation = ColumnMajor | RowMajor
-data GameBoard: Orientation -> Nat -> Nat -> Type where
-   BoardCols: Vect width  (Vect height (Maybe Integer)) -> GameBoard ColumnMajor width height
-   BoardRows: Vect height (Vect width  (Maybe Integer)) -> GameBoard RowMajor    width height
+data GameBoard: Nat -> Nat -> Type where
+   BoardCols: Vect width  (Vect height (Maybe Integer)) -> GameBoard width height
+   BoardRows: Vect height (Vect width  (Maybe Integer)) -> GameBoard width height
 
-(.rows): {h: Nat} -> GameBoard o w h -> Vect h (Vect w (Maybe Integer))
+(.rows): {h: Nat} -> GameBoard w h -> Vect h (Vect w (Maybe Integer))
 (.rows) (BoardCols cols) = transpose cols
 (.rows) (BoardRows rows) = rows
 
-(.cols): {w: Nat} -> GameBoard o w h -> Vect w (Vect h (Maybe Integer))
+(.cols): {w: Nat} -> GameBoard w h -> Vect w (Vect h (Maybe Integer))
 (.cols) (BoardCols cols) = cols
 (.cols) (BoardRows rows) = transpose rows
 
 data GameInput
-   = Move ({o: Orientation} -> {w,h: Nat} -> GameBoard o w h -> (o' ** GameBoard o' w h))
+   = Move ({w,h: Nat} -> GameBoard w h -> GameBoard w h)
    | Quit
 
-move: {o': Orientation} ->
-   ({o: Orientation} -> {w,h: Nat} -> GameBoard o w h -> GameBoard o' w h) -> GameInput
-move f = Move (\b => let b' = f b in (_ ** b'))
+move: ({w,h: Nat} -> GameBoard w h -> GameBoard w h) -> GameInput
+move = Move
 
-empty: {o: Orientation} -> {w,h: Nat} -> GameBoard o w h
-empty {o = ColumnMajor} = BoardCols (replicate w (replicate h Nothing))
-empty {o = RowMajor}    = BoardRows (replicate h (replicate w Nothing))
+empty: {w,h: Nat} -> GameBoard w h
+empty = BoardRows (replicate h (replicate w Nothing))
 
-contains: Integer -> GameBoard o w h -> Bool
+contains: Integer -> GameBoard w h -> Bool
 contains target (BoardRows rows) = any (elem (Just target)) rows
 contains target (BoardCols cols) = any (elem (Just target)) cols
 
@@ -56,19 +53,19 @@ mergePairs xs = xs
 mergePairsToFront: Num a => Eq a => {k: Nat} -> Vect k (Maybe a) -> Vect k (Maybe a)
 mergePairsToFront v = padRight k (mergePairs (catMaybes (toList v)))
 
-slideLeft: {w,h: Nat} -> GameBoard o w h -> GameBoard RowMajor w h
+slideLeft: {w,h: Nat} -> GameBoard w h -> GameBoard w h
 slideLeft board = BoardRows (map mergePairsToFront board.rows)
 
-slideRight: {w,h: Nat} -> GameBoard o w h -> GameBoard RowMajor w h
+slideRight: {w,h: Nat} -> GameBoard w h -> GameBoard w h
 slideRight board = BoardRows$ map (reverse . mergePairsToFront . reverse) board.rows
 
-slideUp: {w,h: Nat} -> GameBoard o w h -> GameBoard ColumnMajor w h
+slideUp: {w,h: Nat} -> GameBoard w h -> GameBoard w h
 slideUp board = BoardCols (map mergePairsToFront board.cols)
 
-slideDown: {o: Orientation} -> {w,h: Nat} -> GameBoard o w h -> GameBoard ColumnMajor w h
+slideDown: {w,h: Nat} -> GameBoard w h -> GameBoard w h
 slideDown board = BoardCols$ map (reverse . mergePairsToFront . reverse) board.cols
 
-availabilities: {w,h: Nat} -> GameBoard o w h -> List (Fin w, Fin h)
+availabilities: {w,h: Nat} -> GameBoard w h -> List (Fin w, Fin h)
 availabilities (BoardRows rows) =
    concat$ toList$ zip range rows <&>
       \(y,row) => map (,y) (findIndices isNothing row)
@@ -83,7 +80,7 @@ emptyNothing: Show a => Maybe a -> String
 emptyNothing Nothing  = ""
 emptyNothing (Just i) = show i
 
-{w: Nat} -> {h: Nat} -> Show (GameBoard o w h) where
+{w: Nat} -> {h: Nat} -> Show (GameBoard w h) where
    show board = fastUnlines$
       toList board.rows <&> \r =>
          fastConcat$ ("| " ::) $ (++ [" |"]) $intersperse " | "
@@ -109,7 +106,7 @@ newGamePrompt = """
 
 %default covering
 
-placeRandom: HasIO io => {w,h: Nat} -> GameBoard o w h -> Maybe (io (GameBoard o w h))
+placeRandom: HasIO io => {w,h: Nat} -> GameBoard w h -> Maybe (io (GameBoard w h))
 placeRandom b = case availabilities b of
    [] => Nothing
    o::opts => Just $do
@@ -136,7 +133,7 @@ getLineOrEnd = do
 abort: String -> a
 abort s = assert_total$ idris_crash s
 
-newGame: IO (w ** h ** GameBoard RowMajor w h)
+newGame: IO (w ** h ** GameBoard w h)
 newGame = do
    putStr newGamePrompt
    let parseDims = parse $ do
@@ -169,25 +166,25 @@ getMoveInput = do
       Just (Right (m,_)) => pure m
 
 ||| The main game loop.
-runGame: {w,h: Nat} -> StateT (o ** GameBoard o w h) IO Bool
+runGame: {w,h: Nat} -> StateT (GameBoard w h) IO Bool
 runGame = do
    Move m <- lift getMoveInput | Quit => lift (putStr "Quitting.\n") >> pure False
-   (_ ** b) <- get
-   let (o ** b) = m b
+   b <- get
+   let b = m b
    let False = contains 2048 b | True => pure True
    case placeRandom b of
       Nothing => pure False
       Just place => do
          b <- place
          print b
-         put (_ ** b)
+         put b
          runGame
 
 main: IO ()
 main = do
    (w ** h ** initialBoard) <- newGame
    print initialBoard
-   if !(evalStateT (_ ** initialBoard) runGame)
+   if !(evalStateT initialBoard runGame)
       then putStr "Winner!\n"
       else putStr "Loser!\n"
 
