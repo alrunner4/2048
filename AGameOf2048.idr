@@ -168,10 +168,11 @@ getMoveInput = do
 ||| The main game loop.
 runGame: {w,h: Nat} -> StateT (GameBoard w h) IO Bool
 runGame = do
-   Move m <- lift getMoveInput | Quit => lift (putStr "Quitting.\n") >> pure False
-   b <- get
-   let b = m b
-   let False = contains 2048 b | True => pure True
+   Move m <- lift getMoveInput
+      | Quit => lift (putStr "Quitting.\n") >> pure False
+   let b = m !get
+   let False =  contains 2048 b
+      | True => pure True
    placeRandom b >>= \case
       Nothing => pure False
       Just newBoard => do
